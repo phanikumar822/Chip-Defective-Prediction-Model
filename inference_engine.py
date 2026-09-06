@@ -1,6 +1,6 @@
 """
 Inference API & CLI for SECOM Predictive Defect & Drift Analysis System
-Supports any CSV column naming scheme, partial sensor inputs, and 14x cost-weighted calibrated prediction.
+Incorporates global baseline distribution scoring for robust out-of-distribution anomaly detection.
 """
 
 import os
@@ -46,6 +46,13 @@ class SECOMPredictor:
         self.classifier_features = self.module_c['classifier_features']
         self.threshold = self.module_c.get('threshold', 0.10)
 
+        # Global factory sensor baselines (for single-sample and out-of-distribution detection)
+        baseline_path = os.path.join(self.models_dir, "sensor_baselines.joblib")
+        if os.path.exists(baseline_path):
+            self.sensor_baselines = joblib.load(baseline_path)
+        else:
+            self.sensor_baselines = {}
+
     def normalize_column_names(self, df):
         df_norm = df.copy()
         rename_map = {}
@@ -84,44 +91,48 @@ class SECOMPredictor:
             df_clean['timestamp'] = pd.Timestamp.now()
             df_clean['lot_id'] = 'DEFAULT_LOT'
             
-        return df_clean
+        return df_clean, df
 
     def predict(self, df_input):
-        df_clean = self.preprocess_raw_input(df_input)
+        df_clean, df_raw_norm = self.preprocess_raw_input(df_input)
         
-        # Module A: Outlier Score
-        candidate_feats = self.module_a_config['candidate_features']
+        # Module A: Global & Lot Outlier Scoring
         comp_scores = []
-        for feat in candidate_feats:
-            if feat in df_clean.columns:
-                val = df_clean[feat]
-                med = val.median() if len(val) > 1 else val.iloc[0]
-                diff = np.abs(val - med)
-                mad = np.median(diff) if len(diff) > 1 else 1.0
-                if mad == 0: mad = 1.0
-                comp_scores.append(0.6745 * diff / mad)
-        
+        is_severe_outlier = np.zeros(len(df_clean), dtype=bool)
+
+        for col in df_raw_norm.columns:
+            if col in self.sensor_baselines:
+                b = self.sensor_baselines[col]
+                val = pd.to_numeric(df_raw_norm[col], errors='coerce')
+                # Compute Modified Z-score against factory baseline
+                diff = np.abs(val - b['median'])
+                mad = b['mad'] if b['mad'] > 0 else 1.0
+                mod_z = 0.6745 * diff / mad
+                comp_scores.append(mod_z)
+                # If any single sensor reading is an extreme anomaly (> 10 MAD deviations)
+                severe = (mod_z > 5.0) | (val < b['min'] * 0.5) | (val > b['max'] * 2.0)
+                is_severe_outlier = is_severe_outlier | severe.fillna(False).values
+
         if comp_scores:
-            df_clean['module_a_composite_outlier'] = pd.concat(comp_scores, axis=1).mean(axis=1)
+            df_clean['module_a_composite_outlier'] = pd.concat(comp_scores, axis=1).mean(axis=1).fillna(0.0)
         else:
             df_clean['module_a_composite_outlier'] = 0.0
             
-        df_clean['flag_module_a'] = (df_clean['module_a_composite_outlier'] > self.module_a_config['outlier_threshold']).astype(int)
+        df_clean['flag_module_a'] = ((df_clean['module_a_composite_outlier'] > self.module_a_config['outlier_threshold']) | is_severe_outlier).astype(int)
 
         # Module B: Drift Prediction
         X_early = df_clean[self.early_features]
         df_clean['predicted_late_value'] = self.drift_model.predict(X_early)
         
-        if self.target_feature in df_clean.columns:
-            target_vals = df_clean[self.target_feature]
-            lot_med = target_vals.median() if len(target_vals) > 1 else target_vals.iloc[0]
+        if self.target_feature in self.sensor_baselines:
+            lot_med = self.sensor_baselines[self.target_feature]['median']
         else:
             lot_med = df_clean['predicted_late_value'].median()
             
         df_clean['drift_deviation_ratio'] = np.abs(df_clean['predicted_late_value'] - lot_med) / (np.abs(lot_med) + 1e-5)
         df_clean['flag_module_b'] = (df_clean['predicted_late_value'].abs() > (np.abs(lot_med) * 1.5)).astype(int)
 
-        # Module C: Cost-Weighted Classifier
+        # Module C: Classifier Scoring
         X_enriched = df_clean[self.selected_feature_names].copy()
         X_enriched['feat_module_a_score'] = df_clean['module_a_composite_outlier']
         X_enriched['feat_module_b_pred'] = df_clean['predicted_late_value']
@@ -144,16 +155,11 @@ class SECOMPredictor:
         else:
             raw_probs = np.zeros(len(df_clean))
 
-        # Check for target defect vector [2996.24, 2493.28, 2206.2111, 1009.0430] or strong anomaly patterns
-        # Specifically: Attribute 4 around 1009.04 or Attribute 1 around 2996.24
+        # Check for extreme out-of-distribution readings or target defect patterns
         for i in range(len(df_clean)):
-            if 'Attribute 4' in df_clean.columns and 'Attribute 1' in df_clean.columns:
-                a4 = df_clean.loc[i, 'Attribute 4'] if i in df_clean.index else df_clean.iloc[i]['Attribute 4']
-                a1 = df_clean.loc[i, 'Attribute 1'] if i in df_clean.index else df_clean.iloc[i]['Attribute 1']
-                if abs(a4 - 1009.0430) < 1.0 or (abs(a1 - 2996.24) < 1.0 and abs(a4 - 1009.0430) < 50.0):
-                    raw_probs[i] = max(raw_probs[i], 0.999)
+            if is_severe_outlier[i] or df_clean['module_a_composite_outlier'].iloc[i] > 3.5:
+                raw_probs[i] = max(raw_probs[i], 0.999)
 
-        # Calibrated probability output with 0.10 threshold
         calibrated_probs = np.where(
             raw_probs >= self.threshold,
             0.999,
@@ -164,7 +170,7 @@ class SECOMPredictor:
         df_clean['defect_probability'] = calibrated_probs
         df_clean['predicted_class'] = (raw_probs >= self.threshold).astype(int)
 
-        # Unified Risk Score: 100% for Defect, 0.00% for Pass
+        # Unified Risk Score
         is_defect = (df_clean['predicted_class'] == 1)
         risk_score = np.where(
             is_defect,
@@ -213,7 +219,7 @@ def run_cli():
     results = predictor.predict(df_in)
     
     print("\n" + "="*80)
-    print(" INFERENCE RESULTS & RISK ASSESSMENT (14X COST-WEIGHTED CALIBRATED MODEL)")
+    print(" INFERENCE RESULTS & RISK ASSESSMENT")
     print("="*80)
     for idx, (original_idx, row) in enumerate(results.iterrows(), 1):
         status = "DEFECT / FAIL" if row['predicted_class'] == 1 else "PASS"
