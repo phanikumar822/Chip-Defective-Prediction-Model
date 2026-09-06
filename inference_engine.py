@@ -1,17 +1,17 @@
 """
 Inference API & CLI for SECOM Predictive Defect & Drift Analysis System
-Supports any CSV column naming scheme:
-  - Numeric headers ('0', '1', ..., '589') or Attribute headers ('Attribute 1', ..., 'Attribute 590')
-  - Target headers ('Pass/Fail', 'class', 'target', 'label')
-  - Timestamp headers ('Time', 'timestamp', 'date')
+Supports any CSV column naming scheme and any number of partial attributes (even 1 or 5 sensors).
 """
 
 import os
 import json
+import warnings
 import joblib
 import argparse
 import numpy as np
 import pandas as pd
+
+warnings.filterwarnings("ignore")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
@@ -44,26 +44,19 @@ class SECOMPredictor:
         self.threshold = self.module_c.get('threshold', 0.50)
 
     def normalize_column_names(self, df):
-        """
-        Automatically normalizes different column conventions:
-        '0' -> 'Attribute 1', 'Pass/Fail' -> 'class', 'Time' -> 'timestamp'
-        """
         df_norm = df.copy()
         rename_map = {}
         
-        # 1. Map target column
         for target_alias in ['Pass/Fail', 'pass/fail', 'Target', 'target', 'Label', 'label', 'Status', 'status']:
             if target_alias in df_norm.columns:
                 rename_map[target_alias] = 'class'
                 break
                 
-        # 2. Map timestamp column
         for time_alias in ['Time', 'time', 'Date', 'date', 'Timestamp', 'datetime', 'DateTime']:
             if time_alias in df_norm.columns:
                 rename_map[time_alias] = 'timestamp'
                 break
                 
-        # 3. Map numerical sensor columns: '0'..'589' -> 'Attribute 1'..'Attribute 590'
         for i in range(600):
             if str(i) in df_norm.columns:
                 rename_map[str(i)] = f"Attribute {i+1}"
@@ -72,16 +65,13 @@ class SECOMPredictor:
             elif f"sensor_{i}" in df_norm.columns:
                 rename_map[f"sensor_{i}"] = f"Attribute {i+1}"
                 
-        df_norm = df_norm.rename(columns=rename_map)
-        return df_norm
+        return df_norm.rename(columns=rename_map)
 
     def preprocess_raw_input(self, df_input):
         df = self.normalize_column_names(df_input)
         
-        for c in self.valid_cols:
-            if c not in df.columns:
-                df[c] = np.nan
-        df_filtered = df[self.valid_cols]
+        # Efficiently reindex missing columns without fragmentation
+        df_filtered = df.reindex(columns=self.valid_cols)
         imputed_arr = self.imputer.transform(df_filtered)
         clean_arr = imputed_arr[:, self.non_constant_mask]
         df_clean = pd.DataFrame(clean_arr, columns=self.selected_feature_names, index=df.index)
@@ -155,7 +145,7 @@ class SECOMPredictor:
         df_clean['defect_probability'] = calibrated_probs
         df_clean['predicted_class'] = (raw_probs >= self.threshold).astype(int)
 
-        # Ultra-low Unified Risk for Pass, 100% for Defect
+        # Unified Risk Score
         is_defect = (df_clean['predicted_class'] == 1)
         risk_score = np.where(
             is_defect,
@@ -173,7 +163,7 @@ class SECOMPredictor:
             
         df_clean['risk_level'] = df_clean['unified_risk_score'].apply(assign_risk_level)
 
-        results = df_clean[[
+        return df_clean[[
             'predicted_class',
             'defect_probability',
             'module_a_composite_outlier',
@@ -184,8 +174,6 @@ class SECOMPredictor:
             'unified_risk_score',
             'risk_level'
         ]].copy()
-        
-        return results
 
 
 def run_cli():
