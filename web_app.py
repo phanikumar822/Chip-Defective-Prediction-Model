@@ -56,19 +56,19 @@ HTML_PAGE = """<!DOCTYPE html>
 <body>
     <div class="container">
         <header>
-            <h1>🔬 Semiconductor Wafer Quality Inspector</h1>
+            <h1>Semiconductor Wafer Quality Inspector</h1>
             <p class="subtitle">Manual Real-Time Sensor Testing & 99.99%-100% Defect Prediction</p>
         </header>
 
         <div class="card">
-            <h3 style="margin-bottom: 12px; font-size: 15px; color: #93c5fd;">⚡ Quick Presets (Click to load sample numbers)</h3>
+            <h3 style="margin-bottom: 12px; font-size: 15px; color: #93c5fd;">Quick Presets (Click to load sample numbers)</h3>
             <div class="presets">
-                <button class="btn-preset" onclick="loadPreset('normal')">🟢 Normal Pass Wafer</button>
-                <button class="btn-preset" onclick="loadPreset('defect')">🔴 Defective Wafer</button>
-                <button class="btn-preset" onclick="loadPreset('drift')">⚠️ Machine Drift / Outlier</button>
+                <button class="btn-preset" onclick="loadPreset('normal')">Normal Pass Wafer</button>
+                <button class="btn-preset" onclick="loadPreset('defect')">Defective Wafer</button>
+                <button class="btn-preset" onclick="loadPreset('drift')">Machine Drift / Outlier</button>
             </div>
 
-            <h3 style="margin-bottom: 15px; font-size: 15px; color: #93c5fd;">📝 Enter Sensor Measurements Directly:</h3>
+            <h3 style="margin-bottom: 15px; font-size: 15px; color: #93c5fd;">Enter Sensor Measurements Directly:</h3>
             <div class="grid">
                 <div class="form-group">
                     <label>Main Process Sensor (0)</label>
@@ -132,10 +132,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 document.getElementById('s4').value = 1.36;
                 document.getElementById('s14').value = 7.95;
             } else if (type === 'defect') {
-                document.getElementById('s0').value = 2988.72;
-                document.getElementById('s1').value = 2470.38;
-                document.getElementById('s2').value = 2201.21;
-                document.getElementById('s3').value = 1544.43;
+                document.getElementById('s0').value = 2996.24;
+                document.getElementById('s1').value = 2493.28;
+                document.getElementById('s2').value = 2206.21;
+                document.getElementById('s3').value = 1009.04;
                 document.getElementById('s4').value = 1.49;
                 document.getElementById('s14').value = 12.80;
             } else if (type === 'drift') {
@@ -168,7 +168,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const isPass = data.predicted_class === 0;
             const badge = document.getElementById('statusBadge');
             badge.className = isPass ? 'badge badge-pass' : 'badge badge-fail';
-            badge.innerText = isPass ? '✅ WAFER PASSED (SAFE TO SHIP)' : '🚨 DEFECT DETECTED (DISCARD WAFER)';
+            badge.innerText = isPass ? 'WAFER PASSED (SAFE TO SHIP)' : 'DEFECT DETECTED (DISCARD WAFER)';
 
             document.getElementById('confVal').innerText = data.confidence + '%';
             document.getElementById('probVal').innerText = data.defect_probability + '%';
@@ -219,7 +219,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 def start_server(port=8501):
     server = HTTPServer(('localhost', port), RequestHandler)
     print("="*75)
-    print(f"🚀 SECOM Interactive Web Dashboard running at: http://localhost:{port}")
+    print(f"[INFO] SECOM Interactive Web Dashboard running at: http://localhost:{port}")
     print("   Open the URL in your web browser to enter sensor numbers directly!")
     print("   Press Ctrl+C in terminal to stop.")
     print("="*75)
