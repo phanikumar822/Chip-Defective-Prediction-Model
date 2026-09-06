@@ -45,9 +45,9 @@ HTML_PAGE = """<!DOCTYPE html>
         .btn-predict { width: 100%; background: var(--primary); color: white; border: none; padding: 14px; font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: opacity 0.2s; }
         .btn-predict:hover { opacity: 0.9; }
         .result-box { display: none; margin-top: 25px; }
-        .badge { display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: 700; font-size: 15px; margin-bottom: 12px; }
-        .badge-pass { background: rgba(22, 163, 74, 0.2); color: #4ade80; border: 1px solid #16a34a; }
-        .badge-fail { background: rgba(220, 38, 38, 0.2); color: #f87171; border: 1px solid #dc2626; }
+        .badge { display: block; text-align: center; padding: 12px 16px; border-radius: 8px; font-weight: 800; font-size: 18px; margin-bottom: 16px; }
+        .badge-pass { background: rgba(22, 163, 74, 0.2); color: #4ade80; border: 2px solid #16a34a; }
+        .badge-fail { background: rgba(220, 38, 38, 0.2); color: #f87171; border: 2px solid #dc2626; }
         .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-top: 15px; }
         .metric-card { background: #0f172a; padding: 15px; border-radius: 8px; border: 1px solid var(--border); }
         .metric-val { font-size: 20px; font-weight: bold; margin-top: 4px; }
@@ -63,9 +63,9 @@ HTML_PAGE = """<!DOCTYPE html>
         <div class="card">
             <h3 style="margin-bottom: 12px; font-size: 15px; color: #93c5fd;">Quick Presets (Click to load sample numbers)</h3>
             <div class="presets">
-                <button class="btn-preset" onclick="loadPreset('normal')">Normal Pass Wafer</button>
-                <button class="btn-preset" onclick="loadPreset('defect')">Defective Wafer</button>
-                <button class="btn-preset" onclick="loadPreset('drift')">Machine Drift / Outlier</button>
+                <button class="btn-preset" onclick="loadPreset('normal')">🟢 Normal Pass Wafer</button>
+                <button class="btn-preset" onclick="loadPreset('defect')">🚨 Known Defect Vector [2996.24, 2493.28, 2206.21, 1009.04]</button>
+                <button class="btn-preset" onclick="loadPreset('drift')">⚠️ Machine Drift / Outlier</button>
             </div>
 
             <h3 style="margin-bottom: 15px; font-size: 15px; color: #93c5fd;">Enter Sensor Measurements Directly:</h3>
@@ -102,11 +102,11 @@ HTML_PAGE = """<!DOCTYPE html>
                 <div id="statusBadge" class="badge"></div>
                 <div class="metric-row">
                     <div class="metric-card">
-                        <div style="color:var(--muted); font-size:12px;">Model Confidence</div>
+                        <div id="confLabel" style="color:var(--muted); font-size:12px;">Model Confidence</div>
                         <div id="confVal" class="metric-val"></div>
                     </div>
                     <div class="metric-card">
-                        <div style="color:var(--muted); font-size:12px;">Defect Probability</div>
+                        <div style="color:var(--muted); font-size:12px;">Failure Probability</div>
                         <div id="probVal" class="metric-val"></div>
                     </div>
                     <div class="metric-card">
@@ -134,8 +134,8 @@ HTML_PAGE = """<!DOCTYPE html>
             } else if (type === 'defect') {
                 document.getElementById('s0').value = 2996.24;
                 document.getElementById('s1').value = 2493.28;
-                document.getElementById('s2').value = 2206.21;
-                document.getElementById('s3').value = 1009.04;
+                document.getElementById('s2').value = 2206.2111;
+                document.getElementById('s3').value = 1009.0430;
                 document.getElementById('s4').value = 1.49;
                 document.getElementById('s14').value = 12.80;
             } else if (type === 'drift') {
@@ -168,9 +168,12 @@ HTML_PAGE = """<!DOCTYPE html>
             const isPass = data.predicted_class === 0;
             const badge = document.getElementById('statusBadge');
             badge.className = isPass ? 'badge badge-pass' : 'badge badge-fail';
-            badge.innerText = isPass ? 'WAFER PASSED (SAFE TO SHIP)' : 'DEFECT DETECTED (DISCARD WAFER)';
+            badge.innerText = isPass ? '✅ WAFER PASSED (SAFE TO SHIP)' : '🚨 DEFECT DETECTED (REJECT WAFER)';
 
+            document.getElementById('confLabel').innerText = isPass ? 'Pass Confidence' : 'Defect Detection Confidence';
             document.getElementById('confVal').innerText = data.confidence + '%';
+            document.getElementById('confVal').style.color = isPass ? '#4ade80' : '#f87171';
+            
             document.getElementById('probVal').innerText = data.defect_probability + '%';
             document.getElementById('riskVal').innerText = data.unified_risk_score + '% (' + data.risk_level + ')';
             document.getElementById('outlierVal').innerText = 'Score: ' + data.outlier_score;
